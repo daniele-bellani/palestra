@@ -130,6 +130,66 @@ function touchSession(session) {
   session.updatedAt = nowIso();
 }
 
+function parseRoute() {
+  const raw = decodeURIComponent(window.location.hash || "#/");
+  const parts = raw.replace(/^#\/?/, "").split("/").filter(Boolean);
+  if (parts[0] === "session" && parts[1]) {
+    return { view: "session", sessionId: parts[1] };
+  }
+  if (parts[0] === "train" && parts[1]) {
+    return { view: "train", sessionId: parts[1] };
+  }
+  return { view: "home", sessionId: null };
+}
+
+function routeHash(view, sessionId) {
+  if (view === "session" && sessionId) return `#/session/${encodeURIComponent(sessionId)}`;
+  if (view === "train" && sessionId) return `#/train/${encodeURIComponent(sessionId)}`;
+  return "#/";
+}
+
+function navigate(view, sessionId = null, replace = false) {
+  const target = routeHash(view, sessionId);
+  if (window.location.hash === target) {
+    applyRoute();
+    return;
+  }
+  if (replace) {
+    window.location.replace(`${window.location.pathname}${window.location.search}${target}`);
+    return;
+  }
+  window.location.hash = target;
+}
+
+function applyRoute() {
+  const route = parseRoute();
+  const session = route.sessionId ? sessionById(route.sessionId) : null;
+
+  if ((route.view === "session" || route.view === "train") && !session) {
+    state.view = "home";
+    state.sessionId = null;
+    state.selectedExerciseId = null;
+    state.modal = null;
+    navigate("home", null, true);
+    return;
+  }
+
+  state.view = route.view;
+  state.sessionId = session?.id || null;
+  state.modal = null;
+
+  if (route.view === "train" && session) {
+    ensureRun(session);
+    if (!state.selectedExerciseId || !exerciseById(session, state.selectedExerciseId)) {
+      state.selectedExerciseId = nextExercise(session)?.id || null;
+    }
+  } else {
+    state.selectedExerciseId = null;
+  }
+
+  render();
+}
+
 function render() {
   const content = state.view === "session"
     ? renderSession()
@@ -864,18 +924,12 @@ document.addEventListener("click", (event) => {
   }
 
   if (action === "back-home") {
-    state.view = "home";
-    state.sessionId = null;
-    state.selectedExerciseId = null;
-    render();
+    navigate("home");
     return;
   }
 
   if (action === "open-session") {
-    state.view = "session";
-    state.sessionId = id || button.dataset.id;
-    state.selectedExerciseId = null;
-    render();
+    navigate("session", id || button.dataset.id);
     return;
   }
 
@@ -889,11 +943,9 @@ document.addEventListener("click", (event) => {
       window.alert("Aggiungi almeno una serie a un esercizio.");
       return;
     }
-    state.view = "train";
-    state.sessionId = id;
     ensureRun(target);
     state.selectedExerciseId = nextExercise(target)?.id || null;
-    render();
+    navigate("train", id);
     return;
   }
 
@@ -901,10 +953,8 @@ document.addEventListener("click", (event) => {
     const target = sessionById(id);
     if (target) {
       resetRun(target);
-      state.view = "train";
-      state.sessionId = target.id;
       state.selectedExerciseId = nextExercise(target)?.id || null;
-      render();
+      navigate("train", target.id);
     }
     return;
   }
@@ -1093,9 +1143,7 @@ document.addEventListener("submit", (event) => {
     db.sessions.push(session);
     saveDb();
     state.modal = null;
-    state.view = "session";
-    state.sessionId = session.id;
-    render();
+    navigate("session", session.id);
     return;
   }
 
@@ -1204,4 +1252,10 @@ if ("serviceWorker" in navigator) {
   });
 }
 
-render();
+window.addEventListener("hashchange", applyRoute);
+
+if (!window.location.hash) {
+  navigate("home", null, true);
+} else {
+  applyRoute();
+}
