@@ -232,10 +232,10 @@ function renderHome() {
           </div>
         </div>
         <div class="toolbar">
-          <button class="button primary" type="button" data-action="train-session" data-id="${session.id}">Avvia</button>
           <button class="button" type="button" data-action="open-session" data-id="${session.id}">Modifica</button>
           <button class="button" type="button" data-action="export-session" data-id="${session.id}">Esporta</button>
           <button class="button danger" type="button" data-action="delete-session" data-id="${session.id}">Elimina</button>
+          <button class="button primary" type="button" data-action="train-session" data-id="${session.id}">Avvia</button>
         </div>
       </div>
     </article>
@@ -512,7 +512,7 @@ function renderExerciseModal() {
           </div>
           <div class="field">
             <label>Peso kg</label>
-            <input type="number" min="0" step="0.5" data-set-id="${set.id}" data-set-field="weight" value="${set.weight}">
+            <input type="number" min="0" step="0.25" data-set-id="${set.id}" data-set-field="weight" value="${set.weight}">
           </div>
         </div>
       `;
@@ -558,7 +558,7 @@ function renderExerciseModal() {
         </div>
         <div class="field">
           <label>Peso kg</label>
-          <input id="block-weight" type="number" min="0" step="0.5" value="0">
+          <input id="block-weight" type="number" min="0" step="0.25" value="0">
         </div>
       </div>
     `;
@@ -643,7 +643,7 @@ function renderCurrentSetModal() {
       <form id="current-set-form">
         <div class="field">
           <label>Peso kg</label>
-          <input name="weight" type="number" min="0" step="0.5" value="${set.weight}">
+          <input name="weight" type="number" min="0" step="0.25" value="${set.weight}">
         </div>
         <button class="button primary" type="submit">Salva peso</button>
       </form>

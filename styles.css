@@ -453,20 +453,26 @@ button {
     top: 70px;
   }
 
-  .grid-2,
+  /*.grid-2,
   .grid-3 {
     grid-template-columns: 1fr;
   }
 
   .item-head {
     display: grid;
-  }
+  }*/
 
-  .row-actions,
+  /*.row-actions,*/
   .set-actions,
   .timer-actions,
   .toolbar {
     width: 100%;
+  }
+  .row-actions {
+	  display: flex;
+	  flex-direction: column;
+	  flex-shrink: 1;
+	  align-items: end;
   }
 
   .button {
