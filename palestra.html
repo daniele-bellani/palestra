@@ -4,10 +4,16 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <meta name="theme-color" content="#000000">
+    <meta name="application-name" content="Palestra">
+    <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="Palestra">
     <title>Palestra</title>
+    <link rel="manifest" href="./manifest.json">
+    <link rel="icon" href="./icon.svg" type="image/svg+xml">
+    <link rel="icon" href="./icon-192.png" type="image/png" sizes="192x192">
+    <link rel="apple-touch-icon" href="./apple-touch-icon.png">
     <link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%20512%20512%22%3E%0A%20%20%3Crect%20width%3D%22512%22%20height%3D%22512%22%20rx%3D%2296%22%20fill%3D%22%23101820%22%2F%3E%0A%20%20%3Cpath%20d%3D%22M86%20234h52v-52h44v148h-44v-52H86v-44Zm102-28h46v100h-46V206Zm90-48h50v196h-50V158Zm92%2048h46v100h-46V206Zm60%2028h52v44h-52v52h-44V182h44v52Z%22%20fill%3D%22%23f6f3ee%22%2F%3E%0A%20%20%3Cpath%20d%3D%22M118%20390h276%22%20stroke%3D%22%23f2aa4c%22%20stroke-width%3D%2228%22%20stroke-linecap%3D%22round%22%2F%3E%0A%3C%2Fsvg%3E%0A">
     <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%20512%20512%22%3E%0A%20%20%3Crect%20width%3D%22512%22%20height%3D%22512%22%20rx%3D%2296%22%20fill%3D%22%23101820%22%2F%3E%0A%20%20%3Cpath%20d%3D%22M86%20234h52v-52h44v148h-44v-52H86v-44Zm102-28h46v100h-46V206Zm90-48h50v196h-50V158Zm92%2048h46v100h-46V206Zm60%2028h52v44h-52v52h-44V182h44v52Z%22%20fill%3D%22%23f6f3ee%22%2F%3E%0A%20%20%3Cpath%20d%3D%22M118%20390h276%22%20stroke%3D%22%23f2aa4c%22%20stroke-width%3D%2228%22%20stroke-linecap%3D%22round%22%2F%3E%0A%3C%2Fsvg%3E%0A">
     <style>
@@ -1694,6 +1700,14 @@ function saveCurrentSetForm(form) {
   saveDb();
   state.modal = null;
   render();
+}
+
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("./sw.js").catch((error) => {
+      console.warn("Service worker registration failed", error);
+    });
+  });
 }
 
 render();
