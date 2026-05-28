@@ -204,6 +204,41 @@ function render() {
   syncTicker();
 }
 
+function openModal(modal) {
+  state.modal = modal;
+  if (!window.history.state?.modal) {
+    window.history.pushState({ modal: true }, "", window.location.href);
+  } else {
+    window.history.replaceState({ modal: true }, "", window.location.href);
+  }
+  render();
+}
+
+function closeModal() {
+  if (!state.modal) return;
+  if (window.history.state?.modal) {
+    window.history.back();
+    return;
+  }
+  state.modal = null;
+  render();
+}
+
+function finishModal() {
+  state.modal = null;
+  if (window.history.state?.modal) {
+    window.history.back();
+  }
+  render();
+}
+
+function clearModalHistoryForNavigation() {
+  state.modal = null;
+  if (window.history.state?.modal) {
+    window.history.replaceState(null, "", window.location.href);
+  }
+}
+
 function shell(title, subtitle, body, actions = "") {
   return `
     <header class="topbar">
@@ -955,14 +990,12 @@ document.addEventListener("click", (event) => {
   }
 
   if (action === "new-session") {
-    state.modal = { type: "session" };
-    render();
+    openModal({ type: "session" });
     return;
   }
 
   if (action === "close-modal") {
-    state.modal = null;
-    render();
+    closeModal();
     return;
   }
 
@@ -1047,20 +1080,17 @@ document.addEventListener("click", (event) => {
     session.exercises.push(exercise);
     touchSession(session);
     saveDb();
-    state.modal = { type: "exercise", exerciseId: exercise.id };
-    render();
+    openModal({ type: "exercise", exerciseId: exercise.id });
     return;
   }
 
   if (action === "edit-exercise") {
-    state.modal = { type: "exercise", exerciseId: id };
-    render();
+    openModal({ type: "exercise", exerciseId: id });
     return;
   }
 
   if (action === "history-exercise") {
-    state.modal = { type: "history", exerciseId: id };
-    render();
+    openModal({ type: "history", exerciseId: id });
     return;
   }
 
@@ -1155,8 +1185,7 @@ document.addEventListener("click", (event) => {
   }
 
   if (action === "edit-current-set") {
-    state.modal = { type: "current-set", setId: id };
-    render();
+    openModal({ type: "current-set", setId: id });
   }
 });
 
@@ -1192,7 +1221,7 @@ document.addEventListener("submit", (event) => {
     };
     db.sessions.push(session);
     saveDb();
-    state.modal = null;
+    clearModalHistoryForNavigation();
     navigate("session", session.id);
     return;
   }
@@ -1253,8 +1282,7 @@ function saveExerciseForm(form) {
   applyExerciseFormValues(form, exercise);
   touchSession(session);
   saveDb();
-  state.modal = null;
-  render();
+  finishModal();
 }
 
 function applyExerciseFormValues(form, exercise) {
@@ -1301,8 +1329,7 @@ function saveCurrentSetForm(form) {
 
   touchSession(session);
   saveDb();
-  state.modal = null;
-  render();
+  finishModal();
 }
 
 if ("serviceWorker" in navigator) {
@@ -1312,6 +1339,13 @@ if ("serviceWorker" in navigator) {
     });
   });
 }
+
+window.addEventListener("popstate", () => {
+  if (state.modal) {
+    state.modal = null;
+    render();
+  }
+});
 
 window.addEventListener("hashchange", applyRoute);
 
