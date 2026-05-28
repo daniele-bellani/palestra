@@ -1,8 +1,7 @@
-const CACHE_NAME = "palestra-v6";
+const CACHE_NAME = "palestra-v7";
 const ASSETS = [
   "./",
   "./index.html",
-  "./palestra.html",
   "./styles.css",
   "./app.js",
   "./manifest.json",

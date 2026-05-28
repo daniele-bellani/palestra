@@ -7,7 +7,9 @@ const state = {
   sessionId: null,
   selectedExerciseId: null,
   modal: null,
-  ticker: null
+  ticker: null,
+  wakeLock: null,
+  wakeLockRequested: false
 };
 
 const emptyDb = () => ({ sessions: [], history: [] });
@@ -183,6 +185,7 @@ function applyRoute() {
     if (!state.selectedExerciseId || !exerciseById(session, state.selectedExerciseId)) {
       state.selectedExerciseId = nextExercise(session)?.id || null;
     }
+    if (state.wakeLockRequested) keepDisplayReady();
   } else {
     state.selectedExerciseId = null;
   }
@@ -702,6 +705,11 @@ function isExerciseComplete(session, exerciseId) {
   return !exercise || exercise.sets.length > 0 && completedCount(run, exercise) === exercise.sets.length;
 }
 
+function hasOpenSets(session, exerciseId) {
+  const exercise = exerciseById(session, exerciseId);
+  return Boolean(exercise && exercise.sets.length > 0 && !isExerciseComplete(session, exercise.id));
+}
+
 function remainingExercises(session) {
   const run = ensureRun(session);
   return session.exercises.filter((exercise) => exercise.sets.length > 0 && completedCount(run, exercise) < exercise.sets.length);
@@ -741,10 +749,10 @@ function finishTimer(session) {
     return;
   }
 
-  if (timer.kind === "rest" && exercise && !isExerciseComplete(session, exercise.id)) {
-    state.selectedExerciseId = exercise.id;
-  } else if (timer.kind === "rest") {
-    state.selectedExerciseId = nextExercise(session)?.id || null;
+  if (timer.kind === "rest" && !hasOpenSets(session, state.selectedExerciseId)) {
+    state.selectedExerciseId = exercise && hasOpenSets(session, exercise.id)
+      ? exercise.id
+      : nextExercise(session)?.id || null;
   }
   saveDb();
   render();
@@ -898,6 +906,35 @@ function recordHistory(session, exercise, set, field, oldValue, newValue) {
   });
 }
 
+async function requestScreenWakeLock() {
+  state.wakeLockRequested = true;
+  if (!("wakeLock" in navigator) || document.visibilityState !== "visible" || state.wakeLock) return;
+  try {
+    state.wakeLock = await navigator.wakeLock.request("screen");
+    state.wakeLock.addEventListener("release", () => {
+      state.wakeLock = null;
+    });
+  } catch {
+    state.wakeLock = null;
+  }
+}
+
+function lockPortraitOrientation() {
+  try {
+    const orientation = screen.orientation;
+    if (orientation?.lock) {
+      orientation.lock("portrait").catch(() => {});
+    }
+  } catch {
+    /* Orientation locking is not supported by every mobile browser. */
+  }
+}
+
+function keepDisplayReady() {
+  requestScreenWakeLock();
+  lockPortraitOrientation();
+}
+
 document.addEventListener("click", (event) => {
   const button = event.target.closest("[data-action]");
   if (!button) return;
@@ -906,8 +943,14 @@ document.addEventListener("click", (event) => {
   const session = sessionById(state.sessionId);
 
   if (action === "fullscreen") {
-    if (!document.fullscreenElement) document.documentElement.requestFullscreen?.();
-    else document.exitFullscreen?.();
+    requestScreenWakeLock();
+    if (!document.fullscreenElement) {
+      const fullscreenRequest = document.documentElement.requestFullscreen?.();
+      if (fullscreenRequest?.then) fullscreenRequest.then(lockPortraitOrientation).catch(lockPortraitOrientation);
+      else lockPortraitOrientation();
+    } else {
+      document.exitFullscreen?.();
+    }
     return;
   }
 
@@ -945,6 +988,7 @@ document.addEventListener("click", (event) => {
     }
     ensureRun(target);
     state.selectedExerciseId = nextExercise(target)?.id || null;
+    keepDisplayReady();
     navigate("train", id);
     return;
   }
@@ -954,6 +998,7 @@ document.addEventListener("click", (event) => {
     if (target) {
       resetRun(target);
       state.selectedExerciseId = nextExercise(target)?.id || null;
+      keepDisplayReady();
       navigate("train", target.id);
     }
     return;
@@ -1083,6 +1128,7 @@ document.addEventListener("click", (event) => {
 
   if (action === "choose-exercise") {
     state.selectedExerciseId = id;
+    keepDisplayReady();
     render();
     return;
   }
@@ -1091,6 +1137,7 @@ document.addEventListener("click", (event) => {
     const exercise = exerciseById(session, state.selectedExerciseId);
     const set = setById(exercise, button.dataset.setId);
     if (exercise && set) {
+      keepDisplayReady();
       markSetDone(session, exercise, set);
       beginRestOrAdvance(session, exercise, set);
     }
@@ -1100,7 +1147,10 @@ document.addEventListener("click", (event) => {
   if (action === "start-work") {
     const exercise = exerciseById(session, state.selectedExerciseId);
     const set = setById(exercise, button.dataset.setId);
-    if (exercise && set) startTimer(session, "work", exercise, set, set.durationSeconds);
+    if (exercise && set) {
+      keepDisplayReady();
+      startTimer(session, "work", exercise, set, set.durationSeconds);
+    }
     return;
   }
 
@@ -1154,6 +1204,15 @@ document.addEventListener("submit", (event) => {
 
   if (form.id === "current-set-form") {
     saveCurrentSetForm(form);
+  }
+});
+
+document.addEventListener("pointerdown", keepDisplayReady, { once: true });
+
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") {
+    if (state.wakeLockRequested) requestScreenWakeLock();
+    if (state.view === "train") lockPortraitOrientation();
   }
 });
 
