@@ -1,5 +1,6 @@
 :root {
   color-scheme: dark;
+  --vvh: 100dvh;
   --bg: #000000;
   --surface: #090909;
   --surface-soft: #171717;
@@ -72,10 +73,15 @@ button {
 	justify-content: end;
 }
 
+.topbar > div:first-child {
+  min-width: 0;
+}
+
 .topbar h1 {
   margin: 0;
   font-size: 1.08rem;
   line-height: 1.2;
+  overflow-wrap: anywhere;
 }
 
 .topbar p {
@@ -296,6 +302,14 @@ button {
   margin-top: 0;
 }
 
+.training-control .timer-face.rest-timer {
+  min-height: 82px;
+}
+
+.training-control .timer-face.rest-timer strong {
+  font-size: clamp(2.4rem, 12vw, 4rem);
+}
+
 .training-control .notice {
   font-size: 1.18rem;
   font-weight: 800;
@@ -343,8 +357,9 @@ button {
 
 .modal {
   width: min(720px, 100%);
-  max-height: calc(100dvh - 32px);
+  max-height: calc(var(--vvh) - 32px);
   overflow: auto;
+  scroll-padding-bottom: 45vh;
   border-radius: 8px;
   background: var(--surface);
   box-shadow: var(--shadow);
@@ -369,6 +384,12 @@ button {
 
 .modal-content {
   padding: 14px;
+}
+
+.modal input,
+.modal textarea,
+.modal select {
+  scroll-margin-bottom: 45vh;
 }
 
 .timer-face {
@@ -420,6 +441,21 @@ button {
   box-shadow: inset 0 0 0 1px var(--primary);
 }
 
+.completed-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.completed-exercise {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 0;
+  border-top: 1px solid var(--line);
+}
+
 .history-entry {
   display: grid;
   gap: 3px;
@@ -453,6 +489,15 @@ button {
     top: 70px;
   }
 
+  .training-control .timer-face {
+    min-height: 104px;
+  }
+
+  .training-control .timer-face.rest-timer {
+    min-height: 72px;
+    margin-bottom: 8px;
+  }
+
   /*.grid-2,
   .grid-3 {
     grid-template-columns: 1fr;
@@ -481,5 +526,9 @@ button {
 
   .button.icon {
     flex: 0 0 46px;
+  }
+
+  .completed-exercise {
+    grid-template-columns: 1fr;
   }
 }

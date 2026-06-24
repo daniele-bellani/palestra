@@ -53,7 +53,30 @@ function normalizeDb(value) {
       });
     });
   });
+  next.history = normalizeHistoryEntries(next.history);
   return next;
+}
+
+function normalizeHistoryEntries(entries) {
+  const byDay = new Map();
+  entries
+    .filter((entry) => entry && typeof entry === "object")
+    .forEach((entry) => {
+      entry.id = entry.id || uid("history");
+      entry.at = entry.at || nowIso();
+      const key = [
+        entry.sessionId || "",
+        entry.exerciseId || "",
+        entry.setId || "",
+        entry.field || "",
+        localDayKey(entry.at)
+      ].join("|");
+      const existing = byDay.get(key);
+      if (!existing || String(entry.at).localeCompare(String(existing.at)) >= 0) {
+        byDay.set(key, entry);
+      }
+    });
+  return Array.from(byDay.values());
 }
 
 function uid(prefix) {
@@ -93,6 +116,21 @@ function formatDate(value) {
     dateStyle: "short",
     timeStyle: "short"
   }).format(new Date(value));
+}
+
+function formatDay(value) {
+  if (!value) return "";
+  return new Intl.DateTimeFormat("it-IT", {
+    dateStyle: "medium"
+  }).format(new Date(value));
+}
+
+function localDayKey(value) {
+  const date = value ? new Date(value) : new Date();
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 function formatDuration(seconds) {
@@ -202,6 +240,8 @@ function render() {
 
   app.innerHTML = content + renderModal();
   syncTicker();
+  syncVisualViewportHeight();
+  syncAutofocus();
 }
 
 function openModal(modal) {
@@ -385,11 +425,21 @@ function renderTraining() {
   const currentSet = firstOpenSet(run, selected);
   const timer = run.timer;
   const timerHtml = timer ? renderTimer(timer) : "";
+  const completed = completedExercises(session);
   const picker = remaining.map((exercise) => `
     <button class="picker-button ${exercise.id === selected.id ? "active" : ""}" type="button" data-action="choose-exercise" data-id="${exercise.id}">
       <span>${escapeHtml(displayExerciseName(exercise))}</span>
       <small>${completedCount(run, exercise)}/${exercise.sets.length}</small>
     </button>
+  `).join("");
+  const completedHtml = completed.map((exercise) => `
+    <div class="completed-exercise">
+      <div>
+        <strong>${escapeHtml(displayExerciseName(exercise))}</strong>
+        <div class="meta">${exercise.sets.length}/${exercise.sets.length} serie completate</div>
+      </div>
+      <button class="button" type="button" data-action="history-exercise" data-id="${exercise.id}">Storico</button>
+    </div>
   `).join("");
 
   const setRows = selected.sets.map((set, index) => {
@@ -413,7 +463,9 @@ function renderTraining() {
   const body = `
     <section class="toolbar">
       <button class="button" type="button" data-action="open-session" data-id="${session.id}">Esci</button>
-      <button class="button" type="button" data-action="new-workout" data-id="${session.id}">Ricomincia</button>
+      <button class="button" type="button" data-action="restart-exercise" data-id="${selected.id}">Ricomincia esercizio</button>
+      <button class="button" type="button" data-action="finish-exercise" data-id="${selected.id}">Esercizio finito</button>
+      <button class="button" type="button" data-action="new-workout" data-id="${session.id}">Nuovo allenamento</button>
     </section>
     <section class="card">
       <div class="card-body">
@@ -432,6 +484,7 @@ function renderTraining() {
         ${actionHtml}
         <div class="set-actions">
           ${currentSet ? `<button class="button" type="button" data-action="edit-current-set" data-id="${currentSet.id}">Modifica serie corrente</button>` : ""}
+          ${timer?.kind === "rest" ? `<button class="button primary" type="button" data-action="skip-rest">Salta riposo</button>` : ""}
         </div>
       </div>
     </section>
@@ -445,9 +498,17 @@ function renderTraining() {
       <h2 class="screen-title">Scegli un altro esercizio</h2>
       <div class="exercise-picker">${picker}</div>
     </section>
+    ${completedHtml ? `
+      <section class="card">
+        <div class="card-body">
+          <h2 class="item-title">Esercizi completati</h2>
+          <div class="completed-list">${completedHtml}</div>
+        </div>
+      </section>
+    ` : ""}
   `;
 
-  return shell(session.name, "Allenamento in corso", body);
+  return shell(displayExerciseName(selected), session.name, body);
 }
 
 function renderSetAction(exercise, set) {
@@ -477,7 +538,7 @@ function renderTimer(timer) {
   const remaining = Math.max(0, Math.ceil((timer.endAt - Date.now()) / 1000));
   const label = timer.kind === "work" ? "Timer serie" : "Riposo";
   return `
-    <div class="timer-face">
+    <div class="timer-face ${timer.kind === "rest" ? "rest-timer" : ""}">
       <div>
         <strong id="timer-time">${formatDuration(remaining)}</strong>
         <div class="timer-label">${label}</div>
@@ -645,7 +706,7 @@ function renderHistoryModal() {
     .sort((a, b) => String(b.at).localeCompare(String(a.at)))
     .map((entry) => `
       <div class="history-entry">
-        <strong>${formatDate(entry.at)}</strong>
+        <strong>${formatDay(entry.at)}</strong>
         <span>${escapeHtml(entry.sessionName)} · serie ${entry.setIndex + 1}</span>
         <span class="muted">${escapeHtml(entry.label)}: ${escapeHtml(entry.oldValue)} → ${escapeHtml(entry.newValue)}</span>
       </div>
@@ -666,11 +727,11 @@ function renderCurrentSetModal() {
           <div class="grid-2">
             <div class="field">
               <label>Minuti</label>
-              <input name="durationMin" type="number" min="0" value="${duration.min}">
+              <input name="durationMin" type="number" min="0" value="${duration.min}" inputmode="numeric" data-autofocus data-select-on-focus>
             </div>
             <div class="field">
               <label>Secondi</label>
-              <input name="durationSec" type="number" min="0" max="59" value="${duration.sec}">
+              <input name="durationSec" type="number" min="0" max="59" value="${duration.sec}" inputmode="numeric" data-select-on-focus>
             </div>
           </div>
           <button class="button primary" type="submit">Salva tempo</button>
@@ -681,7 +742,7 @@ function renderCurrentSetModal() {
       <form id="current-set-form">
         <div class="field">
           <label>Peso kg</label>
-          <input name="weight" type="number" min="0" step="0.25" value="${set.weight}">
+          <input name="weight" type="number" min="0" step="0.25" value="${set.weight}" inputmode="decimal" data-autofocus data-select-on-focus>
         </div>
         <button class="button primary" type="submit">Salva peso</button>
       </form>
@@ -750,6 +811,11 @@ function remainingExercises(session) {
   return session.exercises.filter((exercise) => exercise.sets.length > 0 && completedCount(run, exercise) < exercise.sets.length);
 }
 
+function completedExercises(session) {
+  const run = ensureRun(session);
+  return session.exercises.filter((exercise) => exercise.sets.length > 0 && completedCount(run, exercise) === exercise.sets.length);
+}
+
 function nextExercise(session) {
   return remainingExercises(session)[0] || null;
 }
@@ -789,6 +855,44 @@ function finishTimer(session) {
       ? exercise.id
       : nextExercise(session)?.id || null;
   }
+  saveDb();
+  render();
+}
+
+function skipRestTimer(session) {
+  const run = ensureRun(session);
+  const timer = run.timer;
+  if (!timer || timer.kind !== "rest") return;
+  run.timer = null;
+  const exercise = exerciseById(session, timer.exerciseId);
+  if (!hasOpenSets(session, state.selectedExerciseId)) {
+    state.selectedExerciseId = exercise && hasOpenSets(session, exercise.id)
+      ? exercise.id
+      : nextExercise(session)?.id || null;
+  }
+  saveDb();
+  render();
+}
+
+function restartExercise(session, exercise) {
+  if (!exercise) return;
+  const run = ensureRun(session);
+  if (run.completedSets?.[exercise.id]) delete run.completedSets[exercise.id];
+  if (run.timer?.exerciseId === exercise.id) run.timer = null;
+  state.selectedExerciseId = exercise.id;
+  saveDb();
+  render();
+}
+
+function finishExercise(session, exercise) {
+  if (!exercise) return;
+  const run = ensureRun(session);
+  run.completedSets[exercise.id] = run.completedSets[exercise.id] || {};
+  exercise.sets.forEach((set) => {
+    run.completedSets[exercise.id][set.id] = true;
+  });
+  if (run.timer?.exerciseId === exercise.id) run.timer = null;
+  state.selectedExerciseId = nextExercise(session)?.id || null;
   saveDb();
   render();
 }
@@ -925,9 +1029,18 @@ function normalizeImportedSession(parsed) {
 function recordHistory(session, exercise, set, field, oldValue, newValue) {
   if (String(oldValue) === String(newValue)) return;
   const setIndex = exercise.sets.findIndex((item) => item.id === set.id);
-  db.history.push({
+  const at = nowIso();
+  const dayKey = localDayKey(at);
+  const sameDayIndex = db.history.findIndex((entry) =>
+    entry.sessionId === session.id &&
+    entry.exerciseId === exercise.id &&
+    entry.setId === set.id &&
+    entry.field === field &&
+    localDayKey(entry.at) === dayKey
+  );
+  const entry = {
     id: uid("history"),
-    at: nowIso(),
+    at,
     sessionId: session.id,
     sessionName: session.name,
     exerciseId: exercise.id,
@@ -938,7 +1051,9 @@ function recordHistory(session, exercise, set, field, oldValue, newValue) {
     label: field === "weight" ? "Peso" : "Tempo",
     oldValue: field === "durationSeconds" ? formatDuration(oldValue) : `${oldValue} kg`,
     newValue: field === "durationSeconds" ? formatDuration(newValue) : `${newValue} kg`
-  });
+  };
+  if (sameDayIndex >= 0) db.history[sameDayIndex] = entry;
+  else db.history.push(entry);
 }
 
 async function requestScreenWakeLock() {
@@ -968,6 +1083,29 @@ function lockPortraitOrientation() {
 function keepDisplayReady() {
   requestScreenWakeLock();
   lockPortraitOrientation();
+}
+
+function syncVisualViewportHeight() {
+  const height = window.visualViewport?.height || window.innerHeight;
+  if (height) document.documentElement.style.setProperty("--vvh", `${height}px`);
+}
+
+function keepFocusedInputVisible(element = document.activeElement) {
+  if (!element?.matches?.("input, textarea, select")) return;
+  window.setTimeout(() => {
+    element.scrollIntoView({ block: "center", inline: "nearest", behavior: "smooth" });
+  }, 120);
+}
+
+function syncAutofocus() {
+  if (!state.modal) return;
+  const element = document.querySelector("[data-autofocus]");
+  if (!element) return;
+  window.setTimeout(() => {
+    element.focus({ preventScroll: true });
+    if (element.dataset.selectOnFocus !== undefined) element.select?.();
+    keepFocusedInputVisible(element);
+  }, 60);
 }
 
 document.addEventListener("click", (event) => {
@@ -1157,9 +1295,42 @@ document.addEventListener("click", (event) => {
   }
 
   if (action === "choose-exercise") {
+    if (id !== state.selectedExerciseId) {
+      const target = exerciseById(session, id);
+      const message = target
+        ? `Passare a "${displayExerciseName(target)}"?`
+        : "Cambiare esercizio?";
+      if (!window.confirm(message)) return;
+    }
     state.selectedExerciseId = id;
     keepDisplayReady();
     render();
+    return;
+  }
+
+  if (action === "restart-exercise") {
+    const exercise = exerciseById(session, id);
+    const run = ensureRun(session);
+    const hasProgress = exercise && (completedCount(run, exercise) > 0 || run.timer?.exerciseId === exercise.id);
+    if (exercise && (!hasProgress || window.confirm(`Ricominciare "${displayExerciseName(exercise)}"?`))) {
+      restartExercise(session, exercise);
+      keepDisplayReady();
+    }
+    return;
+  }
+
+  if (action === "finish-exercise") {
+    const exercise = exerciseById(session, id);
+    if (exercise && window.confirm(`Dichiarare finito "${displayExerciseName(exercise)}"?`)) {
+      finishExercise(session, exercise);
+      keepDisplayReady();
+    }
+    return;
+  }
+
+  if (action === "skip-rest") {
+    skipRestTimer(session);
+    keepDisplayReady();
     return;
   }
 
@@ -1205,6 +1376,11 @@ document.addEventListener("input", (event) => {
   saveDb();
 });
 
+document.addEventListener("focusin", (event) => {
+  if (event.target.dataset?.selectOnFocus !== undefined) event.target.select?.();
+  keepFocusedInputVisible(event.target);
+});
+
 document.addEventListener("submit", (event) => {
   event.preventDefault();
   const form = event.target;
@@ -1242,7 +1418,19 @@ document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible") {
     if (state.wakeLockRequested) requestScreenWakeLock();
     if (state.view === "train") lockPortraitOrientation();
+    syncVisualViewportHeight();
+    keepFocusedInputVisible();
   }
+});
+
+window.visualViewport?.addEventListener("resize", () => {
+  syncVisualViewportHeight();
+  keepFocusedInputVisible();
+});
+
+window.addEventListener("resize", () => {
+  syncVisualViewportHeight();
+  keepFocusedInputVisible();
 });
 
 function addSetBlock(session) {
@@ -1352,5 +1540,6 @@ window.addEventListener("hashchange", applyRoute);
 if (!window.location.hash) {
   navigate("home", null, true);
 } else {
+  syncVisualViewportHeight();
   applyRoute();
 }
