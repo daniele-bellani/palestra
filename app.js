@@ -1,6 +1,7 @@
 "use strict";
 
 const STORAGE_KEY = "palestra.app.v1";
+const TIMER_ALERT_TAG_PREFIX = "palestra-rest";
 const app = document.getElementById("app");
 const state = {
   view: "home",
@@ -9,7 +10,8 @@ const state = {
   modal: null,
   ticker: null,
   wakeLock: null,
-  wakeLockRequested: false
+  wakeLockRequested: false,
+  notificationPermissionRequested: false
 };
 
 const emptyDb = () => ({ sessions: [], history: [] });
@@ -727,11 +729,11 @@ function renderCurrentSetModal() {
           <div class="grid-2">
             <div class="field">
               <label>Minuti</label>
-              <input name="durationMin" type="number" min="0" value="${duration.min}" inputmode="numeric" data-autofocus data-select-on-focus>
+              <input name="durationMin" type="text" value="${duration.min}" inputmode="numeric" data-autofocus data-select-on-focus>
             </div>
             <div class="field">
               <label>Secondi</label>
-              <input name="durationSec" type="number" min="0" max="59" value="${duration.sec}" inputmode="numeric" data-select-on-focus>
+              <input name="durationSec" type="text" value="${duration.sec}" inputmode="numeric" data-select-on-focus>
             </div>
           </div>
           <button class="button primary" type="submit">Salva tempo</button>
@@ -740,11 +742,17 @@ function renderCurrentSetModal() {
     })()
     : `
       <form id="current-set-form">
-        <div class="field">
-          <label>Peso kg</label>
-          <input name="weight" type="number" min="0" step="0.25" value="${set.weight}" inputmode="decimal" data-autofocus data-select-on-focus>
+        <div class="grid-2">
+          <div class="field">
+            <label>Ripetizioni</label>
+            <input name="reps" type="text" value="${set.reps}" inputmode="numeric" data-select-on-focus>
+          </div>
+          <div class="field">
+            <label>Peso kg</label>
+            <input name="weight" type="text" value="${set.weight}" inputmode="decimal" data-autofocus data-select-on-focus>
+          </div>
         </div>
-        <button class="button primary" type="submit">Salva peso</button>
+        <button class="button primary" type="submit">Salva serie</button>
       </form>
     `;
   return modalShell("Modifica serie corrente", body);
@@ -765,6 +773,7 @@ function ensureRun(session) {
 }
 
 function resetRun(session) {
+  clearTimerAlert(session);
   session.activeRun = {
     id: uid("run"),
     startedAt: nowIso(),
@@ -820,6 +829,95 @@ function nextExercise(session) {
   return remainingExercises(session)[0] || null;
 }
 
+function timerAlertTag(session) {
+  return `${TIMER_ALERT_TAG_PREFIX}-${session.id}`;
+}
+
+function notifyServiceWorker(type, payload = {}) {
+  if (!("serviceWorker" in navigator)) return;
+  navigator.serviceWorker.ready
+    .then((registration) => {
+      const worker = registration.active || navigator.serviceWorker.controller;
+      worker?.postMessage({ type, payload });
+    })
+    .catch(() => {});
+}
+
+function scheduleTimerAlert(session, timer, exercise) {
+  if (timer.kind !== "rest") {
+    clearTimerAlert(session);
+    return;
+  }
+  if (!("Notification" in window) || Notification.permission !== "granted") return;
+  notifyServiceWorker("schedule-rest-alert", {
+    tag: timerAlertTag(session),
+    title: "Riposo finito",
+    body: `${displayExerciseName(exercise)} · ${session.name}`,
+    endAt: timer.endAt,
+    url: routeHash("train", session.id)
+  });
+}
+
+function clearTimerAlert(session) {
+  if (!session) return;
+  const tag = timerAlertTag(session);
+  notifyServiceWorker("clear-rest-alert", { tag });
+  if (!("serviceWorker" in navigator)) return;
+  navigator.serviceWorker.ready
+    .then((registration) => registration.getNotifications?.({ tag }))
+    .then((notifications) => notifications?.forEach((notification) => notification.close()))
+    .catch(() => {});
+}
+
+function showTimerFinishedNotification(session, timer, exercise) {
+  if (timer.kind !== "rest" || !("Notification" in window) || Notification.permission !== "granted") return;
+  const payload = {
+    tag: timerAlertTag(session),
+    title: "Riposo finito",
+    body: `${displayExerciseName(exercise)} · ${session.name}`,
+    url: routeHash("train", session.id)
+  };
+  if ("serviceWorker" in navigator) {
+    navigator.serviceWorker.ready
+      .then((registration) => registration.showNotification(payload.title, {
+        body: payload.body,
+        tag: payload.tag,
+        renotify: true,
+        requireInteraction: true,
+        vibrate: [450, 180, 450],
+        icon: "./icon-192.png",
+        badge: "./icon-192.png",
+        data: { url: payload.url }
+      }))
+      .catch(() => {});
+    return;
+  }
+  try {
+    new Notification(payload.title, {
+      body: payload.body,
+      tag: payload.tag,
+      icon: "./icon-192.png"
+    });
+  } catch {
+    /* Notification support varies across mobile browsers. */
+  }
+}
+
+function scheduleActiveRestAlert() {
+  const session = sessionById(state.sessionId);
+  const timer = session?.activeRun?.timer;
+  if (!session || timer?.kind !== "rest") return;
+  scheduleTimerAlert(session, timer, exerciseById(session, timer.exerciseId));
+}
+
+function alertTimerFinished(session, timer, exercise) {
+  beep();
+  navigator.vibrate?.([450, 180, 450]);
+  if (document.visibilityState !== "visible") {
+    showTimerFinishedNotification(session, timer, exercise);
+  }
+}
+
 function startTimer(session, kind, exercise, set, seconds) {
   const run = ensureRun(session);
   run.timer = {
@@ -829,6 +927,7 @@ function startTimer(session, kind, exercise, set, seconds) {
     total: Math.max(0, seconds),
     endAt: Date.now() + Math.max(0, seconds) * 1000
   };
+  scheduleTimerAlert(session, run.timer, exercise);
   saveDb();
   syncTicker();
   render();
@@ -841,8 +940,9 @@ function finishTimer(session) {
   run.timer = null;
   const exercise = exerciseById(session, timer.exerciseId);
   const set = setById(exercise, timer.setId);
+  clearTimerAlert(session);
   saveDb();
-  beep();
+  alertTimerFinished(session, timer, exercise);
 
   if (timer.kind === "work" && exercise && set) {
     markSetDone(session, exercise, set);
@@ -864,6 +964,7 @@ function skipRestTimer(session) {
   const timer = run.timer;
   if (!timer || timer.kind !== "rest") return;
   run.timer = null;
+  clearTimerAlert(session);
   const exercise = exerciseById(session, timer.exerciseId);
   if (!hasOpenSets(session, state.selectedExerciseId)) {
     state.selectedExerciseId = exercise && hasOpenSets(session, exercise.id)
@@ -878,7 +979,10 @@ function restartExercise(session, exercise) {
   if (!exercise) return;
   const run = ensureRun(session);
   if (run.completedSets?.[exercise.id]) delete run.completedSets[exercise.id];
-  if (run.timer?.exerciseId === exercise.id) run.timer = null;
+  if (run.timer?.exerciseId === exercise.id) {
+    run.timer = null;
+    clearTimerAlert(session);
+  }
   state.selectedExerciseId = exercise.id;
   saveDb();
   render();
@@ -891,7 +995,10 @@ function finishExercise(session, exercise) {
   exercise.sets.forEach((set) => {
     run.completedSets[exercise.id][set.id] = true;
   });
-  if (run.timer?.exerciseId === exercise.id) run.timer = null;
+  if (run.timer?.exerciseId === exercise.id) {
+    run.timer = null;
+    clearTimerAlert(session);
+  }
   state.selectedExerciseId = nextExercise(session)?.id || null;
   saveDb();
   render();
@@ -1048,12 +1155,24 @@ function recordHistory(session, exercise, set, field, oldValue, newValue) {
     setId: set.id,
     setIndex,
     field,
-    label: field === "weight" ? "Peso" : "Tempo",
-    oldValue: field === "durationSeconds" ? formatDuration(oldValue) : `${oldValue} kg`,
-    newValue: field === "durationSeconds" ? formatDuration(newValue) : `${newValue} kg`
+    label: historyFieldLabel(field),
+    oldValue: formatHistoryValue(field, oldValue),
+    newValue: formatHistoryValue(field, newValue)
   };
   if (sameDayIndex >= 0) db.history[sameDayIndex] = entry;
   else db.history.push(entry);
+}
+
+function historyFieldLabel(field) {
+  if (field === "weight") return "Peso";
+  if (field === "reps") return "Ripetizioni";
+  return "Tempo";
+}
+
+function formatHistoryValue(field, value) {
+  if (field === "durationSeconds") return formatDuration(value);
+  if (field === "reps") return `${value} rip.`;
+  return `${value} kg`;
 }
 
 async function requestScreenWakeLock() {
@@ -1085,8 +1204,33 @@ function keepDisplayReady() {
   lockPortraitOrientation();
 }
 
+function requestTimerNotificationPermission() {
+  if (!("Notification" in window) || Notification.permission !== "default" || state.notificationPermissionRequested) return;
+  state.notificationPermissionRequested = true;
+  try {
+    const request = Notification.requestPermission();
+    if (request?.then) {
+      request
+        .then((permission) => {
+          if (permission === "granted") scheduleActiveRestAlert();
+        })
+        .catch(() => {});
+    }
+  } catch {
+    /* Notifications are optional and browser-dependent. */
+  }
+}
+
+function prepareMobileTimerAlerts() {
+  keepDisplayReady();
+  requestTimerNotificationPermission();
+}
+
 function syncVisualViewportHeight() {
-  const height = window.visualViewport?.height || window.innerHeight;
+  const viewport = window.visualViewport;
+  const height = viewport?.height || window.innerHeight;
+  const top = viewport?.offsetTop || 0;
+  document.documentElement.style.setProperty("--vv-top", `${top}px`);
   if (height) document.documentElement.style.setProperty("--vvh", `${height}px`);
 }
 
@@ -1159,7 +1303,7 @@ document.addEventListener("click", (event) => {
     }
     ensureRun(target);
     state.selectedExerciseId = nextExercise(target)?.id || null;
-    keepDisplayReady();
+    prepareMobileTimerAlerts();
     navigate("train", id);
     return;
   }
@@ -1169,7 +1313,7 @@ document.addEventListener("click", (event) => {
     if (target) {
       resetRun(target);
       state.selectedExerciseId = nextExercise(target)?.id || null;
-      keepDisplayReady();
+      prepareMobileTimerAlerts();
       navigate("train", target.id);
     }
     return;
@@ -1303,7 +1447,7 @@ document.addEventListener("click", (event) => {
       if (!window.confirm(message)) return;
     }
     state.selectedExerciseId = id;
-    keepDisplayReady();
+    prepareMobileTimerAlerts();
     render();
     return;
   }
@@ -1314,7 +1458,7 @@ document.addEventListener("click", (event) => {
     const hasProgress = exercise && (completedCount(run, exercise) > 0 || run.timer?.exerciseId === exercise.id);
     if (exercise && (!hasProgress || window.confirm(`Ricominciare "${displayExerciseName(exercise)}"?`))) {
       restartExercise(session, exercise);
-      keepDisplayReady();
+      prepareMobileTimerAlerts();
     }
     return;
   }
@@ -1323,14 +1467,14 @@ document.addEventListener("click", (event) => {
     const exercise = exerciseById(session, id);
     if (exercise && window.confirm(`Dichiarare finito "${displayExerciseName(exercise)}"?`)) {
       finishExercise(session, exercise);
-      keepDisplayReady();
+      prepareMobileTimerAlerts();
     }
     return;
   }
 
   if (action === "skip-rest") {
     skipRestTimer(session);
-    keepDisplayReady();
+    prepareMobileTimerAlerts();
     return;
   }
 
@@ -1338,7 +1482,7 @@ document.addEventListener("click", (event) => {
     const exercise = exerciseById(session, state.selectedExerciseId);
     const set = setById(exercise, button.dataset.setId);
     if (exercise && set) {
-      keepDisplayReady();
+      prepareMobileTimerAlerts();
       markSetDone(session, exercise, set);
       beginRestOrAdvance(session, exercise, set);
     }
@@ -1349,7 +1493,7 @@ document.addEventListener("click", (event) => {
     const exercise = exerciseById(session, state.selectedExerciseId);
     const set = setById(exercise, button.dataset.setId);
     if (exercise && set) {
-      keepDisplayReady();
+      prepareMobileTimerAlerts();
       startTimer(session, "work", exercise, set, set.durationSeconds);
     }
     return;
@@ -1420,6 +1564,13 @@ document.addEventListener("visibilitychange", () => {
     if (state.view === "train") lockPortraitOrientation();
     syncVisualViewportHeight();
     keepFocusedInputVisible();
+    const session = sessionById(state.sessionId);
+    const timer = session?.activeRun?.timer;
+    if (timer && Date.now() >= timer.endAt) {
+      finishTimer(session);
+    } else {
+      syncTicker();
+    }
   }
 });
 
@@ -1509,9 +1660,13 @@ function saveCurrentSetForm(form) {
       session.activeRun.timer.total = newValue;
     }
   } else {
+    const oldReps = set.reps;
+    const newReps = toInt(data.get("reps"), oldReps);
     const oldValue = set.weight;
     const newValue = toNumber(data.get("weight"), oldValue);
+    set.reps = newReps;
     set.weight = newValue;
+    recordHistory(session, exercise, set, "reps", oldReps, newReps);
     recordHistory(session, exercise, set, "weight", oldValue, newValue);
   }
 

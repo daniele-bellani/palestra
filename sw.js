@@ -1,4 +1,4 @@
-const CACHE_NAME = "palestra-v8";
+const CACHE_NAME = "palestra-v10";
 const ASSETS = [
   "./",
   "./index.html",
@@ -11,6 +11,7 @@ const ASSETS = [
   "./icon-maskable-512.png",
   "./apple-touch-icon.png"
 ];
+const scheduledRestAlerts = new Map();
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
@@ -52,3 +53,56 @@ self.addEventListener("fetch", (event) => {
     })
   );
 });
+
+self.addEventListener("message", (event) => {
+  const message = event.data || {};
+  const { type, payload = {} } = message;
+  if (type === "clear-rest-alert") {
+    clearRestAlert(payload.tag);
+    return;
+  }
+  if (type !== "schedule-rest-alert" || !payload.tag || !payload.endAt) return;
+  clearRestAlert(payload.tag);
+  const delay = Math.max(0, payload.endAt - Date.now());
+  const timeoutId = setTimeout(() => {
+    scheduledRestAlerts.delete(payload.tag);
+    self.registration.showNotification(payload.title || "Riposo finito", {
+      body: payload.body || "Riprendi l'allenamento.",
+      tag: payload.tag,
+      renotify: true,
+      requireInteraction: true,
+      vibrate: [450, 180, 450],
+      icon: "./icon-192.png",
+      badge: "./icon-192.png",
+      data: { url: payload.url || "./" }
+    }).catch(() => {});
+  }, delay);
+  scheduledRestAlerts.set(payload.tag, timeoutId);
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const targetUrl = new URL(event.notification.data?.url || "./", self.registration.scope).href;
+  event.waitUntil(
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clients) => {
+      const existing = clients.find((client) => client.url.split("#")[0] === targetUrl.split("#")[0]);
+      if (existing) {
+        if (existing.navigate) {
+          return existing.navigate(targetUrl).then((client) => client?.focus());
+        }
+        return existing.focus();
+      }
+      return self.clients.openWindow(targetUrl);
+    })
+  );
+});
+
+function clearRestAlert(tag) {
+  if (!tag) return;
+  const timeoutId = scheduledRestAlerts.get(tag);
+  if (timeoutId) clearTimeout(timeoutId);
+  scheduledRestAlerts.delete(tag);
+  self.registration.getNotifications?.({ tag })
+    .then((notifications) => notifications.forEach((notification) => notification.close()))
+    .catch(() => {});
+}

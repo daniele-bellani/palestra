@@ -1,5 +1,6 @@
 :root {
   color-scheme: dark;
+  --vv-top: 0px;
   --vvh: 100dvh;
   --bg: #000000;
   --surface: #090909;
@@ -346,12 +347,17 @@ button {
 
 .modal-backdrop {
   position: fixed;
-  inset: 0;
+  top: var(--vv-top);
+  right: 0;
+  bottom: auto;
+  left: 0;
   z-index: 50;
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   justify-content: center;
+  height: var(--vvh);
   padding: 16px;
+  overflow: hidden;
   background: rgba(0, 0, 0, 0.72);
 }
 
@@ -359,7 +365,8 @@ button {
   width: min(720px, 100%);
   max-height: calc(var(--vvh) - 32px);
   overflow: auto;
-  scroll-padding-bottom: 45vh;
+  overscroll-behavior: contain;
+  scroll-padding: 76px 0 38vh;
   border-radius: 8px;
   background: var(--surface);
   box-shadow: var(--shadow);
